@@ -1,0 +1,164 @@
+#Modelización Garch##JesusBZerpa#
+#Gráfico interactivo Plotly#
+
+library(plotly)
+library(quantmod)
+portfolio = c("BTC-USD")
+getSymbols(portfolio, src="yahoo", from="2014-01-01")
+
+df <- na.omit(data.frame(Date=index(`BTC-USD`),coredata(`BTC-USD`)))
+
+bbands <- BBands(na.omit(`BTC-USD`[,c("BTC-USD.High","BTC-USD.Low","BTC-USD.Close")]))
+
+df <- subset(cbind(df, data.frame(bbands[,1:3])), Date >= "2014-01-01")
+
+for (i in 1:length(df[,1])) {
+  if (df$BTC.USD.Close[i] >= df$BTC.USD.Open[i]) {
+      df$direction[i] = 'Increasing'
+  } else {
+      df$direction[i] = 'Decreasing'
+  }
+}
+
+i <- list(line = list(color = '#17BECF'))
+d <- list(line = list(color = '#7F7F7F'))
+
+
+fig <- df %>% plot_ly(x = ~Date, type="candlestick",
+          open = ~BTC.USD.Open, close = ~BTC.USD.Close,
+          high = ~BTC.USD.High, low = ~BTC.USD.Low, name = "BTC-USD",
+          increasing = i, decreasing = d) 
+fig <- fig %>% add_lines(x = ~Date, y = ~up , name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands",
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% add_lines(x = ~Date, y = ~dn, name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands", inherit = F,
+            showlegend = FALSE, hoverinfo = "none") 
+fig <- fig %>% add_lines(x = ~Date, y = ~mavg, name = "Mv Avg",
+            line = list(color = '#E377C2', width = 0.5),
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% layout(yaxis = list(title = "Precio"))
+
+fig2 <- df 
+fig2 <- fig2 %>% plot_ly(x=~Date, y=~BTC.USD.Volume, type='bar', name = "BTC.USD Volume",
+          color = ~direction, colors = c('#17BECF','#7F7F7F')) 
+fig2 <- fig2 %>% layout(yaxis = list(title = "Volumen"))
+
+rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+           xanchor = 'center', yref = 'paper',
+           font = list(size = 9),
+           buttons = list(
+             list(count=1,
+                  label='RESET',
+                  step='all'),
+             list(count=1,
+                  label='1 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=3,
+                  label='3 MO',
+                  step='month',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 MO',
+                  step='month',
+                  stepmode='backward')
+           ))
+
+fig <- subplot(fig, fig2, heights = c(0.7,0.2), nrows=2,
+             shareX = TRUE, titleY = TRUE)
+fig <- fig %>% layout(title = paste("Bitcoin - USD: 2014-01-01 -",Sys.Date()),
+         xaxis = list(rangeselector = rs),
+         legend = list(orientation = 'h', x = 0.5, y = 1,
+                       xanchor = 'center', yref = 'paper',
+                       font = list(size = 10),
+                       bgcolor = 'transparent'))
+
+fig
+
+#Preparación de data y librerías#
+BTCSP <- read.csv("C:/Users/Personal/Desktop/BTCSP.csv", sep=";")
+precio<-BTCSP
+library(zoo)
+precio.zoo=zoo(precio[,-1], order.by=as.Date(strptime(as.character(precio[,1]), "%d.%m.%Y")))
+library(rmgarch)
+
+#Modelo Garch y especificaciones#
+library(PerformanceAnalytics)
+model<- window(precio.zoo [,"BTC.Close"],  start="2014-01-01")
+model<- na.approx(na.trim(CalculateReturns(model), side="both"))
+spec = ugarchspec()
+print(spec)
+
+def.fit = ugarchfit(spec = spec, data = model)
+print(def.fit)
+
+#preparacion del modelo egarch#
+garch112e2.2.2.spec = ugarchspec(mean.model = list(armaOrder = c(0,0)), 
+                               variance.model = list(garchOrder = c(2,1),
+                                                     model = "eGARCH"), distribution.model = "std")
+garch.fit112e2.2.2= ugarchfit(garch112e2.2.2.spec, data = model, fit.control=list(scale=TRUE))
+print(garch.fit112e2.2.2)
+
+#graficas##
+garch.fit = ugarchfit(garch112e2.2.2.spec, data = model, fit.control=list(scale=TRUE))
+plot(garch.fit, which=3)
+plot(garch.fit, which=2)
+
+#VaR#
+garchroll <- ugarchroll(garch112e2.2.2.spec, data = model, n.start =500,
+                        refit.window = "moving"
+                        , refit.every = 100)
+garchVaR <- quantile(garchroll, probs=0.01)
+actual <- xts(as.data.frame(garchroll)$Realized, time(garchVaR))
+
+mean(actual < garchVaR)
+VaRplot(alpha = 0.01, actual = actual, VaR = garchVaR)
+report(garchroll, type = "VaR", VaR.alpha = 0.01, conf.level = 0.99)
+plot(garch.fit, which=1)
+plot(garch.fit, which=8)
+plot(garch.fit, which=9)
+plot(garch.fit, which=12)
+plot(garch.fit, which = "all")
+
+#Pronósticos#
+forecast1<-ugarchforecast(garch.fit,n.ahead = 3) 
+forecast1
+plot(forecast1,which=1)
+plot(forecast1,which=3)
+
+
+###############################
+modelfit=ugarchfit(garch112e2.2.2.spec,data=model, solver="hybrid", out.sample=20)
+modelforecast<-ugarchforecast(modelfit, data = NULL, n.ahead = 30, n.roll = 20, external.forecasts = list(mregfor = NULL, vregfor = NULL))
+modelforecast
+garch112.1.1.spec = ugarchspec(mean.model = list(armaOrder = c(1,1)), 
+                               variance.model = list(garchOrder = c(1,1),
+                                                     model = "sGARCH"), distribution.model = "norm")
+garch.fit112.1.1= ugarchfit(garch112.1.1.spec, data = model, fit.control=list(scale=TRUE))
+garchroll2 <- ugarchroll(garch112.1.1.spec, data = model, n.start =500,
+                        refit.window = "moving"
+                        , refit.every = 100)
+garch112.1.1.spec = ugarchspec(mean.model = list(armaOrder = c(1,1)), 
+                               variance.model = list(garchOrder = c(1,1),
+                                                     model = "sGARCH"), distribution.model = "norm")
+garch.fit112.1.1= ugarchfit(garch112.1.1.spec, data = model, fit.control=list(scale=TRUE))
+garchroll2 <- ugarchroll(garch112.1.1.spec, data = model, n.start =500,
+                        refit.window = "moving"
+                        , refit.every = 100)
+
+###############################
+library(rugarch)
+report(garchroll, type="fpm")
+report(garchroll2, type="fpm")
+plot(modelforecast,which=2)
+plot(modelforecast,which=4)
+
+###############################
+bootp=ugarchboot(garch.fit,method=c("Partial","Full")[1],n.ahead = 12,n.bootpred=1000,n.bootfit=1000)
+bootp
+plot(bootp,which=2)
+plot(bootp,which=3)
+
