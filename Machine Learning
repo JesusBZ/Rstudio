@@ -1,0 +1,212 @@
+#Aprendizaje Automático#
+#JesusBZerpa#
+#Preparación Data#
+
+library(workflows)
+library(parsnip)
+library(recipes)
+library(yardstick)
+library(glmnet)
+library(tidyverse)
+library(tidyquant)
+library(timetk)
+library(plotly)
+library(knitr)
+library(kableExtra)
+bicicleta <- read_csv("C:/Users/Personal/Desktop/Modelo en R/Arima manufactura/Prueba/day.csv")
+Bicicletas_tab <- bicicleta %>%
+    select(dteday, cnt) %>%
+    rename(date  = dteday,
+           value = cnt)
+kable(Bicicletas_tab, digits = 2, format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped"),
+                full_width = T,
+                font_size = 15) %>%
+   scroll_box(height = "200px")
+   
+   #Gráfica##
+   
+   ggplotly(Bicicletas_tab %>%
+    ggplot(aes(x = date, y = value)) +
+    geom_rect(xmin = as.numeric(ymd("2012-07-01")),
+              xmax = as.numeric(ymd("2013-01-01")),
+              ymin = 0, ymax = 10000,
+              fill = "#ff4242", color = NA, size = 0, alpha = 0.4) +
+    annotate("text", x = ymd("2011-10-01"), y = 7800,
+             color = palette_light()[[1]], label = "Entrenamiento") +
+    annotate("text", x = ymd("2012-10-01"), y = 1550,
+             color = palette_light()[[1]], label = "Prueba") +
+    geom_point(alpha = 0.5, color = palette_light()[[1]]) +
+    labs(title = "Bicicletas compartidas Dataset: Frecuencia Diaria", x = "") +
+    theme_tq())
+    
+    #Separar entrenamiento y prueba#
+    
+entrenamiento_tab <- Bicicletas_tab %>% filter(date < ymd("2012-07-01"))
+prueba_tab  <- Bicicletas_tab %>% filter(date >= ymd("2012-07-01"))
+
+#Modelo##
+
+kable(entrenamiento_tab, digits = 2, format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped"),
+                full_width = T,
+                font_size = 15) %>%
+   scroll_box(height = "200px")
+   
+#Preprocesamiento de recetas#
+
+recipe_spec_serietemporal <- recipe(value ~ ., data = entrenamiento_tab) %>%
+    step_timeseries_signature(date) 
+    
+kable(bake(prep(recipe_spec_serietemporal), new_data = entrenamiento_tab), digits = 2, format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped"),
+                full_width = T,
+                font_size = 15) %>%
+   scroll_box(height = "200px")
+   
+#Caracterísiticas de preprocesamiento#
+
+recipe_spec_final <- recipe_spec_serietemporal%>%
+    step_rm(date) %>%
+    step_rm(contains("iso"), contains("minute"), contains("hour"),
+            contains("am.pm"), contains("xts")) %>%
+    step_normalize(contains("index.num"), date_year) %>%
+    step_dummy(contains("lbl"), one_hot = TRUE) 
+kable(bake(prep(recipe_spec_final), new_data = entrenamiento_tab), digits = 2, format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped"),
+                full_width = T,
+                font_size = 15) %>%
+   scroll_box(height = "200px")
+
+#especificación modelo#
+
+model_spec_glmnet <- linear_reg(mode = "regression") %>%
+    set_engine("lm")
+    
+#Flujo de trabajo#
+
+flujotrabajo_glmnet <- workflow() %>%
+    add_recipe(recipe_spec_final) %>%
+    add_model(model_spec_glmnet)
+
+flujotrabajo_glmnet
+
+#Entrenamiento#
+
+flujotrabajo_entrenamiento <- flujotrabajo_glmnet %>% fit(data = entrenamiento_tab)
+
+#Prueba de validación#
+
+pronostico_tab <- flujotrabajo_entrenamiento %>% 
+    predict(prueba_tab) %>%
+    bind_cols(prueba_tab) 
+
+kable(pronostico_tab, digits = 2, format = "html", row.names = TRUE) %>%
+  kable_styling(bootstrap_options = c("striped"),
+                full_width = T,
+                font_size = 15) %>%
+   scroll_box(height = "200px")
+   
+ #Gráfico#
+ 
+ ggplotly(ggplot(aes(x = date), data = Bicicletas_tab) +
+    geom_rect(xmin = as.numeric(ymd("2012-07-01")),
+              xmax = as.numeric(ymd("2013-01-01")),
+              ymin = 0, ymax = 10000,
+              fill = "#ff4242", color = NA, size = 0, alpha = 0.4) +
+    annotate("text", x = ymd("2011-10-01"), y = 7800,
+             color = palette_light()[[1]], label = "Entrenamiento") +
+    annotate("text", x = ymd("2012-10-01"), y = 1550,
+             color = palette_light()[[1]], label = "Prueba") + 
+    geom_point(aes(x = date, y = value),  
+               alpha = 0.5, color = palette_light()[[1]]) +
+    # se agregan los pronósticos de prueba
+    geom_point(aes(x = date, y = .pred), data = pronostico_tab, 
+               alpha = 0.5, color = palette_light()[[2]]) +
+    theme_tq()) 
+    
+    
+    #Validación fuera de muestra#
+    
+    tbl_df(pronostico_tab %>% metrics(value, .pred))
+    
+    #Gráfico de Residuos#
+    
+    ggplotly(pronostico_tab %>%
+    ggplot(aes(x = date, y = value - .pred)) +
+    geom_hline(yintercept = 0, color = "red") +
+    geom_point(color = palette_light()[[1]], alpha = 0.5) +
+    geom_smooth() +
+    theme_tq() +
+    labs(title = "Prueba Set: GLM Residuos del Modelo", x = "") +
+    scale_y_continuous(limits = c(-5000, 5000)))
+    
+    #Pronósticos#
+    
+    fechas <- Bicicletas_tab %>% tk_index()
+Bicicletas_summary <- fechas %>% tk_get_timeseries_summary()
+
+Bicicletas_summary[1:6]
+Bicicletas_summary[7:12]
+fecha_futuro <- fechas %>% tk_make_future_timeseries(n_future = 180)
+futuro_tab <- tibble(date = fecha_futuro) 
+futuro_tab
+pronosticos_meses_tab <- flujotrabajo_glmnet %>% 
+    fit(data = Bicicletas_tab) %>%
+    predict(futuro_tab) %>%
+    bind_cols(futuro_tab)
+    
+#Gráfico#
+ggplotly(Bicicletas_tab %>%
+    ggplot(aes(x = date, y = value)) +
+    geom_rect(xmin = as.numeric(ymd("2012-07-01")),
+              xmax = as.numeric(ymd("2013-01-01")),
+              ymin = 0, ymax = 10000,
+              fill = "#ff4242", color = NA, size = 0, alpha = 0.4) +
+    geom_rect(xmin = as.numeric(ymd("2013-01-01")),
+              xmax = as.numeric(ymd("2013-07-01")),
+              ymin = 0, ymax = 10000,
+              fill = "#42e3ff", color = NA, size = 0, alpha = 0.4) +
+    annotate("text", x = ymd("2011-10-01"), y = 7800,
+             color = palette_light()[[1]], label = "Entrenamiento") +
+    annotate("text", x = ymd("2012-10-01"), y = 1550,
+             color = palette_light()[[1]], label = "Prueba") +
+    annotate("text", x = ymd("2013-4-01"), y = 1550,
+             color = palette_light()[[1]], label = "Pronóstico") +
+    geom_point(alpha = 0.5, color = palette_light()[[1]]) +
+    # future data
+    geom_point(aes(x = date, y = .pred), data = pronosticos_meses_tab,
+               alpha = 0.5, color = palette_light()[[2]]) +
+    geom_smooth(aes(x = date, y = .pred), data = pronosticos_meses_tab,
+                method = 'loess') + 
+    labs(title = "Bicicletas compartidas Dataset: 6 meses de pronóstico", x = "") +
+    theme_tq())
+    
+    #Error de pronóstico##
+    test_resid_sd <- pronostico_tab %>%
+    summarize(stdev = sd(value - .pred))
+
+pronosticos_meses_tab <- pronosticos_meses_tab %>%
+    mutate(
+        lo.95 = .pred - 1.96 * test_resid_sd$stdev,
+        lo.80 = .pred - 1.28 * test_resid_sd$stdev,
+        hi.80 = .pred + 1.28 * test_resid_sd$stdev,
+        hi.95 = .pred + 1.96 * test_resid_sd$stdev
+    )
+    
+   #Gráfico#
+   ggplotly(Bicicletas_tab %>%
+    ggplot(aes(x = date, y = value)) +
+    geom_point(alpha = 0.5, color = palette_light()[[1]]) +
+    geom_ribbon(aes(y = .pred, ymin = lo.95, ymax = hi.95), 
+                data = pronosticos_meses_tab, 
+                fill = "#D5DBFF", color = NA, size = 0) +
+    geom_ribbon(aes(y = .pred, ymin = lo.80, ymax = hi.80, fill = key), 
+                data = pronosticos_meses_tab,
+                fill = "#596DD5", color = NA, size = 0, alpha = 0.8) +
+    geom_point(aes(x = date, y = .pred), data = pronosticos_meses_tab,
+               alpha = 0.5, color = palette_light()[[2]]) +
+    geom_smooth(aes(x = date, y = .pred), data = pronosticos_meses_tab,
+                method = 'loess', color = "white") + 
+    labs(title = "Bicicletas compartidas: 6 meses de pronóstico con intérvalos 80/95", x = "") +
+    theme_tq())
