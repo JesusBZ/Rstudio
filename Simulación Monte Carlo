@@ -1,0 +1,168 @@
+#modelización Monte Carlo#
+#Jesús Zerpa#
+
+library(tidyquant)
+library(tidyverse)
+library(timetk)
+library(broom)
+library(highcharter)
+library(plotly)
+
+instrumentos<- c("MSFT", "JNJ", "MA", "PEP", "WMT", "MCD")
+
+precios <- 
+  getSymbols(instrumentos, src = 'yahoo', 
+             from = "2010-01-04",
+             to = "2020-04-30",
+             auto.assign = TRUE, warnings = FALSE) %>% 
+  map(~Ad(get(.))) %>%
+  reduce(merge) %>% 
+  `colnames<-`(instrumentos)
+
+comp <- c(0.041, 0.278, 0.074, 0.142, 0.23,0.234)
+
+retornosp <-  
+ precios %>% 
+  to.monthly(indexAt = "lastof", OHLC = FALSE) %>% 
+  tk_tbl(preserve_index = TRUE, rename_index = "date") %>%
+  gather(asset, returns, -date) %>% 
+  group_by(asset) %>%  
+  mutate(returns = (log(returns) - log(lag(returns)))) %>% 
+  na.omit()
+
+
+retornos_rebalanceados_mensual <- 
+  retornosp %>%
+  tq_portfolio(assets_col  = asset, 
+               returns_col = returns,
+               weights     = comp,
+               col_rename  = "returns",
+               rebalance_on = "months")
+
+
+media_retornos <- 
+  mean(retornos_rebalanceados_mensual$returns)
+
+destandar_retornos <- 
+  sd(retornos_rebalanceados_mensual$returns)
+
+
+
+simulacion_acumul_1 <- function(init_value, N, mean, stdev) {
+    tibble(c(init_value, 1 + rnorm(N, mean, stdev))) %>% 
+    `colnames<-`("returns") %>%
+    mutate(growth = 
+             accumulate(returns, 
+                        function(x, y) x * y)) %>% 
+    select(growth)
+}
+
+
+simu <- 100
+comienzo<- 
+  rep(1, simu) %>%
+  set_names(paste("sim", 1:simu, sep = ""))
+
+head(comienzo)
+tail(comienzo)
+
+ 
+monte_carlo_sim_100 <-map_dfc(comienzo,simulacion_acumul_1,N = 120, mean = media_retornos,stdev =destandar_retornos)
+ 
+
+tail(monte_carlo_sim_100 %>%  select(growth...1, growth...2,        growth...99, growth...100), 3)
+
+ 
+monte_carlo_sim_100 <- 
+  monte_carlo_sim_100 %>% 
+  mutate(month = seq(1:nrow(.))) %>% 
+  select(month, everything()) %>% 
+  `colnames<-`(c("month", names(comienzo))) %>% 
+   mutate_all(funs(round(., 2))) 
+ 
+tail(monte_carlo_sim_100 %>%  select(month, sim1, sim2,
+                                    sim99, sim100), 3)
+  
+monte_carlo_rerun_6 <-  
+  rerun(.n = 6, 
+      simulacion_acumul_1(1, 
+                        120,
+                        media_retornos, 
+                        destandar_retornos))
+                        
+map(monte_carlo_rerun_6, head)
+
+
+reruns <- 100
+
+monte_carlo_rerun_100<- 
+rerun(.n = reruns, 
+      simulacion_acumul_1(1, 
+                        120,
+                        media_retornos, 
+                        destandar_retornos)) %>%
+  simplify_all() %>% 
+  `names<-`(paste("sim", 1:reruns, sep = " ")) %>%
+  as_tibble() %>% 
+  mutate(month = seq(1:nrow(.))) %>% 
+  select(month, everything())
+
+tail(monte_carlo_rerun_100 %>%  select(`sim 1`, `sim 2`,
+                                    `sim 99`, `sim 100`), 3)
+                                    
+                                    
+  monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>% 
+  ggplot(aes(x = month, y = growth, color = sim)) + 
+  geom_line() +
+  theme(legend.position="none")
+  
+  ggplotly(monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>% 
+  ggplot(aes(x = month, y = growth, color = sim)) + 
+  geom_line() +
+  theme(legend.position="none"))
+  
+  resumen<- 
+  monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>% 
+  summarise(final = last(growth)) %>% 
+  summarise(
+    max = max(final), 
+    min = min(final),
+    mean= mean(final),
+    median = median(final))
+resumen
+
+monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>%
+  filter(
+    last(growth) == resumen$max || 
+      last(growth) == resumen$mean || 
+      last(growth) == resumen$median ||
+      last(growth) == resumen$min) %>% 
+  ggplot(aes(x = month, y = growth)) + 
+  geom_line(aes(color = sim)) 
+
+
+(monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>%
+  filter(
+    last(growth) == resumen$max || 
+      last(growth) == resumen$mean ||
+      last(growth) == resumen$median ||
+      last(growth) == resumen$min) %>% 
+  ggplot(aes(x = month, y = growth)) + 
+  geom_line(aes(color = sim))) 
+
+
+ 
+
+
+
+
