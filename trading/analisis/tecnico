@@ -1,0 +1,164 @@
+###Analisis tecnico 1ra parte###
+###jesus Zerpa#######
+
+library(quantmod)
+library(TTR)
+portfolio = c("BTC-USD")
+
+getSymbols(portfolio, src="yahoo", from="2014-01-01")
+head(`BTC-USD`,n=3)
+
+chartSeries(`BTC-USD`,
+            type="line",
+            subset='2020',
+            theme=chartTheme('white'))
+
+chartSeries(`BTC-USD`,
+            type="bar",
+            subset='2020-09',
+            theme=chartTheme('white'))
+
+chartSeries(`BTC-USD`,
+            type="candlesticks",
+            subset='2020-09',
+            up.col = 'white',
+            down.col = 'black',
+            theme=chartTheme('white'))
+
+chartSeries(`BTC-USD`,
+            type="candlesticks",
+            subset='2020-09',
+            up.col = 'white',
+            down.col = 'black',
+            theme=chartTheme('white'))
+addSMA(n=30,on=1,col = "blue")
+addSMA(n=200,on=1,col = "red")
+
+chartSeries(`BTC-USD`,
+            subset='2017-05::2020-09',
+            theme=chartTheme('white'))
+addEMA(n=30,on=1,col = "blue")
+addEMA(n=200,on=1,col = "red")
+
+myBBands <- function (price,n,sd){
+  mavg <- SMA(price,n)
+  sdev <- rep(0,n)
+  N <- nrow(price)
+  for (i in (n+1):N){
+    sdev[i]<- sd(price[(i-n+1):i])
+  }
+  sdev <- sqrt((n-1)/n)*sdev
+  up <- mavg + sd*sdev
+  dn <- mavg - sd*sdev
+  pctB <- (price - dn)/(up - dn)
+  output <- cbind(dn, mavg, up, pctB)
+  colnames(output) <- c("dn", "mavg", "up", 
+        "pctB")
+  return(output)
+}
+
+p<-na.omit(`BTC-USD`)
+bb <-myBBands(Cl(p),n=20,sd=2)
+tail(bb,n=5)
+
+chartSeries(`BTC-USD`,
+            subset='2020-05::2020-09',
+            theme=chartTheme('white'))
+addBBands(n=20,sd=2)
+
+mymom <- function (price,n){
+  mom <- rep(0,n)
+  N <- nrow(price)
+  Lprice <- Lag(price,n)
+  for (i in (n+1):N){
+    mom[i]<-price[i]-Lprice[i]
+  }
+  mom <- reclass(mom,price)
+  return(mom)
+}
+
+p<-na.omit(`BTC-USD`)
+M <- mymom(Cl(p), n=2)
+tail(M,n=5)
+chartSeries(`BTC-USD`,
+            subset='2020-05::2020-09',
+            theme=chartTheme('white'))
+addMomentum(n=1)
+
+myROC <- function (price,n){
+  roc <- rep(0,n)
+  N <- nrow(price)
+  Lprice <- Lag(price,n)
+  for (i in (n+1):N){
+    roc[i]<-(price[i]-Lprice[i])/Lprice[i]
+  }
+
+  roc <- reclass(roc,price)
+  return(roc)
+}
+
+p<-na.omit(`BTC-USD`)
+roc <- myROC(Cl(p),n=2)
+tail(roc,n=3)
+
+p<-na.omit(`BTC-USD`)
+roc <- ROC(Cl(p),type="discrete",n=2)
+tail(roc,n=3)
+
+chartSeries(`BTC-USD`,
+            subset='2020-05::2020-09',
+            theme=chartTheme('white'))
+addROC(n=7)
+
+myMACD <- function (price,S,L,K){
+  MACD <- EMA(price,S) - EMA(price,L)
+  signal <- EMA(MACD,K)
+  output <- cbind(MACD,signal)
+  colnames(output) <- c("MACD","signal")
+  return(output)
+}
+
+p<-na.omit(`BTC-USD`)
+macd <- myMACD(Cl(p), 12, 26,9)
+tail(macd,n=5)
+
+macd <- MACD(Cl(p), nFast=12, nSlow=26,
+             nSig=9, percent=FALSE)
+tail(macd,n=5)
+
+chartSeries(`BTC-USD`,
+            subset='2020-05::2020-09',
+            theme=chartTheme('white'))
+addMACD(fast=12,slow=26,signal=9,type="EMA")
+
+myRSI <- function (price,n){
+  N <- length(price)
+  U <- rep(0,N)
+  D <- rep(0,N)
+  rsi <- rep(NA,N)
+  Lprice <- Lag(price,1)
+  for (i in 2:N){
+    if (price[i]>=Lprice[i]){
+      U[i] <- price[i]- Lprice[i]
+    } else{
+      D[i] <- Lprice[i]- price[i]
+    }
+    if (i>n){
+      AvgUp <- mean(U[(i-n+1):i])
+      AvgDn <- mean(D[(i-n+1):i])
+      rsi[i] <- AvgUp/(AvgUp+AvgDn)*100 
+      }
+    }
+
+  rsi <- reclass(rsi, price)
+  return(rsi)
+}
+
+p<-na.omit(`BTC-USD`)
+rsi <- myRSI(Cl(p), n=14)
+tail(rsi,n=3)
+
+chartSeries(`BTC-USD`,
+            subset='2020-05::2020-09',
+            theme=chartTheme('white'))
+addRSI(n=14,maType="EMA")
